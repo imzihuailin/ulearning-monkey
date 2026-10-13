@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         优学院自动刷课助手
 // @namespace    local.ulearning-auto
-// @version      1.4.0
-// @description  自动播放视频课程、自动翻页、自动处理"离开太久"/未完成弹窗。只刷视频与翻页，不答题。
+// @version      1.5.0
+// @description  自动播放视频课程、自动翻页、自动处理"离开太久"/未完成弹窗。只刷视频与翻页，不答题；遇到习题自动跳过，必答题停下交还控制权。
 // @author       you
 // @match        *://ua.ulearning.cn/*
 // @grant        none
@@ -36,11 +36,12 @@
 
   // ================= 配置区 =================
   const CONFIG = {
-    playbackRate: 8,          // 默认倍速（面板可选 1/1.5/2/4/8/16）
+    playbackRate: 8,          // 默认倍速（面板只给 8/16 两档）
     maxRate: 16,              // 浏览器 playbackRate 实际上限
     minRate: 1,               // 自适应降速的下限
     autoBackoff: true,        // 撞到防拖拽/停滞时自动降速
     pollInterval: 600,        // 视频轮询间隔（毫秒）
+    watchdogMs: 1500,         // 暂停看门狗检查间隔（非用户暂停就自动续播）
     stallBackoffAt: 15,       // 连续停滞 N 秒自动降一档
     noProgressLimit: 150,     // 单个视频连续 N 秒无进度则放弃该视频
     metaWaitLimit: 20,        // 视频元数据（duration）最多等 N 秒，超过才判定不可播
@@ -69,12 +70,33 @@
     confirmLeave: 'button.btn-hollow[data-bind="text: $root.i18nMsgText().confirmLeave"]',
     incompleteChapter: 'span[data-bind="text: i18nMessageText().incompleteChapter"]',
     incompleteChapter2: 'span[data-bind="text: i18nMessageText().incompleteChapter2"]',
-    goNextPage: 'button.btn-hollow[data-bind="click: goNextPage"]',
-    closeStatPage: 'button.btn-hollow[data-bind="click: closeStatPage"]',
+    goNextPage: 'button.btn-hollow[data-bind*="goNextPage"]',
+  };
+
+  // 结算页专用（page.html:335 小节结算 / :385 章节结算）
+  // 注意必须用 *= ：小节那个按钮的 data-bind 是 "click: goNextPage, css: {...}"，精确 = 匹配不到
+  const SEL_S = {
+    statPage: '.stat-page',
+    statNext: 'button.btn-hollow[data-bind*="goNextPage"]',
   };
 
   // ================= 工具 =================
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // 可被「暂停」打断的等待：running 变 false 就提前返回（不留 "paused" 分支）
+  async function nap(ms) {
+    const end = Date.now() + ms;
+    while (running && Date.now() < end) {
+      await sleep(Math.min(200, Math.max(0, end - Date.now())));
+    }
+  }
+
+  // 真正把页面上的媒体停住（暂停与退出都走这里）
+  function haltMedia() {
+    document.querySelectorAll('video').forEach((v) => {
+      try { v.pause(); } catch (e) {}
+    });
+  }
 
   async function waitForElement(selector, timeout = 10000) {
     const start = Date.now();
@@ -112,13 +134,17 @@
   }
 
   // ================= 状态 =================
-  let running = false;
-  let paused = false;
+  let running = false;                     // 唯一运行状态（没有 paused 分支）
+  let runToken = 0;                        // 每次「开始」自增；旧循环发现 token 变了就静默退场
   let desiredRate = CONFIG.playbackRate;   // 面板选定的目标倍速
   let effectiveRateSeen = 0;               // 最近一次实际生效的倍速（自适应降档后更低）
   let seenVideoSec = 0;                    // 已实测的视频总时长，用于估算平均值
   let seenVideoCount = 0;
   let progressTimer = null;
+  let watchdogTimer = null;
+  let userPaused = false;                  // 用户按过「暂停」-> 看门狗不许自动续播
+  let needUserAttention = false;           // 遇到必答习题，停下等你作答
+  let noMoreHits = 0;                      // 平台"没有下一页"信号连续命中次数
 
   // ================= 课程总进度（读平台自己的数据模型）=================
   function pageDone(pg) {
@@ -226,6 +252,25 @@
     if (el) el.textContent = s;
   }
 
+  // 看门狗：非用户暂停就自动续播，并顺手点掉平台那种暂停弹窗。
+  // 只保留两个排除：用户按的暂停、习题弹窗开着。
+  // 它独立于 playVideo 的循环 —— playAllVideos() 在"本页没有视频"时会直接 return，
+  // 那种情况下只有这里还在盯着，所以必须单独起一个定时器。
+  function startWatchdog() {
+    if (watchdogTimer) return;
+    watchdogTimer = setInterval(() => {
+      if (!running || userPaused) return;
+      if (questionModalOpen()) return;                 // 习题弹窗开着，别动它
+      if (modalVisible(SEL.walkingTooLong)) {          // 平台的"离开太久/网络不稳定"弹窗
+        click(SEL.continueStudy);
+        return;
+      }
+      document.querySelectorAll('.video-element video').forEach((v) => {
+        if (v.paused && !v.ended) { try { v.play(); } catch (e) {} }
+      });
+    }, CONFIG.watchdogMs);
+  }
+
   function createPanel() {
     if (document.getElementById('ul-panel')) return;
     const p = document.createElement('div');
@@ -236,7 +281,7 @@
       'box-shadow:0 6px 24px rgba(0,0,0,.4);overflow:hidden;';
     p.innerHTML = `
       <div id="ul-drag" style="padding:10px 14px;background:#2a3040;font-weight:600;display:flex;justify-content:space-between;align-items:center;cursor:move;">
-        <span>优学院刷课助手 v1.4</span>
+        <span>优学院刷课助手 v1.5</span>
         <span id="ul-status" style="color:#9be98c;font-size:12px;">待机</span>
       </div>
       <div style="padding:8px 14px 10px;background:#232936;">
@@ -271,19 +316,30 @@
       if (running) { log('已在运行'); return; }
       const d = document.getElementById('ul-done');
       if (d) { d.style.display = 'none'; d.innerHTML = ''; }
-      running = true; paused = false;
+      // G5：平台可能正停在"离开太久"弹窗上，不先点掉的话 play() 立刻又会被它暂停
+      if (modalVisible(SEL.walkingTooLong)) { click(SEL.continueStudy); log('先点掉"离开太久"弹窗'); }
+      runToken++;                       // 让上一轮遗留的循环作废
+      const token = runToken;
+      running = true;
+      userPaused = false;
+      needUserAttention = false;
+      noMoreHits = 0;
       desiredRate = parseFloat(document.getElementById('ul-rate').value);
       setStatus('运行中');
       log('启动，倍速 ' + desiredRate + 'x');
       updateProgress();
-      mainLoop();
+      startWatchdog();
+      mainLoop(token);
     });
 
     document.getElementById('ul-pause').addEventListener('click', () => {
       if (!running) { log('当前没有在运行'); return; }
-      paused = !paused;
-      setStatus(paused ? '已暂停' : '运行中');
-      log(paused ? '已暂停，点击恢复' : '已恢复');
+      running = false;
+      userPaused = true;
+      runToken++;                       // 让在跑的循环立刻作废
+      haltMedia();                      // 真把视频停住，不是只改个标志位
+      setStatus('已暂停');
+      log('已暂停（视频已停住），点「开始」继续');
     });
 
     document.getElementById('ul-rate').addEventListener('change', (e) => {
@@ -316,9 +372,10 @@
   // ================= 退出机制 =================
   function finish(reason, ok) {
     running = false;
-    paused = false;
+    needUserAttention = false;
+    haltMedia();
     setStatus(ok ? '已完成' : '已停止');
-    log((ok ? '✅ ' : '⏹ ') + reason + '，已退出运行');
+    log((ok ? '✅ ' : '⏹ ') + reason);
     updateProgress();
 
     if (!ok) return;
@@ -386,7 +443,7 @@
     }
   }
 
-  async function playVideo(item) {
+  async function playVideo(item, token) {
     const video = document.querySelector(`#${item.id} video`);
     if (!video) { log('未找到 video 元素：' + item.id); return false; }
 
@@ -404,16 +461,36 @@
     let durRecorded = false;
 
     for (;;) {
-      if (!running) return false;
-      while (paused) await sleep(500);
+      if (!running || token !== runToken) return false;
       const tickStart = Date.now();
       await sleep(CONFIG.pollInterval);
+      if (!running || token !== runToken) return false;   // 睡醒后先确认还在跑
+
+      // 0) 结算页突然出现 -> 立刻收工（正文可能已被 KO 卸载，判定会失灵，别在这空等）
+      if (statPageOpen()) { log('页面已切到结算页，结束本视频'); return true; }
 
       // 1) 平台自己标记"已看完" -> 结束（权威判据）
       if (isVideoFinished(item)) { log('✔ 平台已标记看完：' + item.id); return true; }
 
       // 2) "离开太久"暂停弹窗
       handleModal(SEL.walkingTooLong, () => click(SEL.continueStudy), '检测到暂停弹窗，点击继续学习');
+
+      // 2.5) 视频内嵌习题弹窗：能跳过就跳过，必答题则停下交还控制权（方案 A）
+      if (questionModalOpen()) {
+        const cont = document.querySelector('button[data-bind*="continueVideo"]');
+        if (cont && cont.offsetParent !== null) {
+          cont.click();
+          log('检测到习题弹窗，点「继续视频」跳过');
+        } else {
+          log('遇到必答习题，已停下 —— 请作答后点「开始」继续');
+          needUserAttention = true;
+          setStatus('需要你作答');
+          running = false;
+          runToken++;              // 作废本轮，mainLoop 会静默退场，不覆盖这里的状态
+          haltMedia();
+          return false;
+        }
+      }
 
       // 3) 面板改倍速 -> 采纳
       if (desiredRate !== lastDesired) {
@@ -493,63 +570,131 @@
     }
   }
 
-  async function playAllVideos() {
+  async function playAllVideos(token) {
     const items = getVideoItems();
     if (items.length === 0) { log('本页未检测到 .video-element'); return; }
     log(`本页共 ${items.length} 个视频`);
     for (const item of items) {
-      if (!running) return;
+      if (!running || token !== runToken) return;
       if (isVideoFinished(item)) { log('跳过已看完：' + item.id); continue; }
       log('开始播放：' + item.id);
-      await playVideo(item);
+      await playVideo(item, token);
     }
+  }
+
+  // ---- 结算页（每章/每节结束时会盖住正文的那张卡）----
+  function statPageOpen() {
+    const el = document.querySelector(SEL_S.statPage);
+    return !!(el && el.offsetParent !== null);
+  }
+
+  // 结算页：能继续就继续；看不到"下一章/下一节"就是整门课刷完了。
+  // 方案 A：最后一章**不点**「关闭」—— 它内部是 goPreviousPage()×2，点掉会把你导航回内容页。
+  //         脚本只判定完成并停下，把"恭喜完成"那张卡留在屏幕上当确认。
+  function handleStatPage() {
+    if (!statPageOpen()) return false;
+
+    const nextBtn = document.querySelector(SEL_S.statNext);
+    if (nextBtn && nextBtn.offsetParent !== null) {
+      nextBtn.click();
+      log('结算页：点「下一章 / 下一节」继续');
+      return false;                     // 还能继续
+    }
+
+    log('结算页：没有下一章了 —— 判定整门课刷完');
+    return true;
+  }
+
+  // 整页练习：pageElement.type()==6 把 .question-view 直接渲染在正文里（不是弹窗里那个）
+  function pageHasQuestions() {
+    const q = document.querySelector('.question-view');
+    return !!(q && !q.closest('.modal'));
+  }
+
+  // 视频答题弹窗（pageView.html:139  div.modal.fade.video-question-modal）
+  function questionModalOpen() {
+    const el = document.querySelector('.video-question-modal');
+    return !!(el && el.offsetParent !== null);
+  }
+
+  // 平台自己的"没有下一页"信号：.btn-tip 整个包在 ko ifnot(nextPageName()==noMore) 里，
+  // 到了最后一页它根本不渲染 —— 可以当次级兜底判据。
+  function noMorePages() {
+    try {
+      const vm = window.koLearnCourseViewModel;
+      const np = vm && vm.nextPageName && vm.nextPageName();
+      const imt = window.i18nMessageText;
+      const msg = typeof imt === 'function' ? imt() : imt;
+      const noMore = msg && msg.noMore;
+      return !!(np && noMore && np === noMore);
+    } catch (e) { return false; }
   }
 
   function drainModals() {
     handleModal(SEL.questionsNotCompleted, () => click(SEL.confirmLeave), '题目未完成弹窗，点击确认离开');
     handleModal(SEL.incompleteChapter, () => click(SEL.goNextPage), '章节未完成弹窗，点击继续下一章');
-    return handleModal(SEL.incompleteChapter2, () => click(SEL.closeStatPage), '课程已结束，关闭统计页');
+    // 这个"课程已结束"提示不再当完成判据（权威判据是结算页上的按钮），只记一条日志
+    handleModal(SEL.incompleteChapter2, () => {}, '检测到"课程已结束"提示（以结算页判定为准）');
   }
 
-  async function nextPage() {
+  async function nextPage(token) {
+    if (statPageOpen()) return handleStatPage();
+
     if (!isVideoCourse()) {
       window.scrollTo(0, document.body.scrollHeight);
       await sleep(150);
     }
 
-    if (drainModals()) return true;
+    drainModals();
 
-    if (click(SEL.nextPage)) log('点击下一页');
+    const nextBtn = document.querySelector(SEL.nextPage);
+    const hadNextBtn = !!nextBtn;
+    if (nextBtn) { nextBtn.click(); log('点击下一页'); }
     else log('未找到下一页按钮');
 
     const clickAt = Date.now();
     const deadline = clickAt + CONFIG.modalWaitMs;
     while (Date.now() < deadline) {
       await sleep(CONFIG.modalPollMs);
-      if (drainModals()) return true;
+      drainModals();
+      if (!running || token !== runToken) return false;
       if (Date.now() - clickAt >= CONFIG.cleanGraceMs) break;
+    }
+
+    // 次级兜底：这一页连"下一页"按钮都没有，而且平台自己说没有下一页了
+    if (hadNextBtn) { noMoreHits = 0; return false; }
+    if (noMorePages()) {
+      noMoreHits++;
+      if (noMoreHits >= 2) { log('平台已标记"没有下一页"，判定整门课刷完'); return true; }
     }
     return false;
   }
 
-  async function mainLoop() {
+  async function mainLoop(token) {
     let samePage = 0;
     try {
       for (let i = 0; i < CONFIG.maxLoops && running; i++) {
+        if (token !== runToken) return;              // 被新一轮 / 暂停取代，静默退场
         setStatus(`第 ${i + 1} 页`);
-        if (isVideoCourse()) {
-          await playAllVideos();
-        } else {
-          log('非视频页，停留 ' + CONFIG.textPageWait + 'ms 后翻页');
-          await sleep(CONFIG.textPageWait);
+
+        if (!statPageOpen()) {                       // 结算页盖上来时别再折腾视频
+          if (isVideoCourse()) {
+            await playAllVideos(token);
+          } else if (pageHasQuestions()) {
+            log('本页是习题页，不作答直接跳过');
+          } else {
+            log('阅读页，停留 ' + CONFIG.textPageWait + 'ms 后翻页');
+            await nap(CONFIG.textPageWait);
+          }
         }
-        if (!running) return;   // 手动停止
+        if (!running || token !== runToken) return;  // 手动暂停 / 被取代
 
         const fpBefore = pageFingerprint();
-        if (await nextPage()) { finish('整门课程已完成', true); return; }
-        if (!running) return;
+        const done = await nextPage(token);
+        if (!running || token !== runToken) return;  // 旧 token 不许调 finish()
+        if (done) { finish('课程刷完啦！🥳', true); return; }
 
-        await sleep(150);       // 给 Knockout 一点时间切页
+        await nap(150);                              // 给 Knockout 一点时间切页
         const fpAfter = pageFingerprint();
         if (fpAfter === fpBefore) {
           samePage++;
@@ -562,9 +707,9 @@
         }
         updateProgress();
       }
-      if (running) finish('达到翻页上限 ' + CONFIG.maxLoops, false);
+      if (running && token === runToken) finish('达到翻页上限 ' + CONFIG.maxLoops, false);
     } catch (e) {
-      finish('运行中出错：' + (e && e.message ? e.message : e), false);
+      if (token === runToken) finish('运行中出错：' + (e && e.message ? e.message : e), false);
     }
   }
 
