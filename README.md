@@ -10,7 +10,7 @@
 
 3. 把 [ulearning-auto.user.js](./ulearning-auto.user.js) 里面的内容粘贴进去
 
-4. 打开优学院网站，脚本自动启动
+4. 打开课程视频，脚本自动启动
 
 ## 限制
 
