@@ -58,7 +58,7 @@
 
 ```bash
 npm install     # 只装 jsdom（测试用）
-npm test        # 18 条回归测试
+npm test        # 20 条回归测试
 ```
 
 - `ulearning-auto.user.js` —— 脚本本体（唯一交付物）

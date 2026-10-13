@@ -218,6 +218,34 @@ test('平台把视频暂停了（非用户操作）-> 看门狗自动续播', as
   assert.ok(v.playCalls > before, '看门狗应把视频自动续播起来');
 });
 
+test('习题弹窗开着时，看门狗不去动视频', async (t) => {
+  const h = await boot(t);
+  hideModals(h.window);
+  markVideoUnfinished(h.window);
+  const v = installVideoMock(h.window, { paused: true });
+  h.start();
+  await sleep(1500);
+  makeVideoQuestionModal(h.window, 'skippable');              // 弹窗打开且一直不关
+  await sleep(600);
+  v.paused = true;
+  const before = v.playCalls;
+  await sleep(2000);
+  assert.strictEqual(v.playCalls, before, '习题弹窗开着时不该自动续播');
+});
+
+test('本页没有视频时，看门狗依然会点掉「离开太久」弹窗', async (t) => {
+  const h = await boot(t);
+  hideModals(h.window);
+  h.doc.querySelector('.video-element').remove();             // 没有视频 -> playAllVideos 直接 return
+  let clicked = 0;
+  h.doc.querySelector('button[data-bind*="continueStudy"]')
+    .addEventListener('click', () => { clicked++; });
+  h.doc.querySelector('[data-bind*="walkingTooLong"]').style.display = '';
+  h.start();
+  await sleep(3000);
+  assert.ok(clicked >= 1, '看门狗独立于 playVideo 的循环，这种情况只有它还盯着');
+});
+
 // ---------------------------------------------------------------- 习题
 
 test('整页习题（type 6）-> 不作答，直接翻页', async (t) => {
