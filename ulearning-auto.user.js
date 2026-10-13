@@ -253,10 +253,6 @@
         <button id="ul-pause" style="padding:6px 12px;background:#6b7280;color:#fff;border:none;border-radius:6px;cursor:pointer;">暂停</button>
         <label style="font-size:12px;color:#bbb;">倍速
           <select id="ul-rate" style="margin-left:4px;padding:4px;border-radius:4px;background:#2a3040;color:#fff;border:1px solid #444;">
-            <option value="1">1x</option>
-            <option value="1.5">1.5x</option>
-            <option value="2">2x</option>
-            <option value="4">4x</option>
             <option value="8" selected>8x</option>
             <option value="16">16x</option>
           </select>

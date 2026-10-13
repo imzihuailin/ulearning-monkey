@@ -85,3 +85,25 @@ test('面板只留三个按钮：开始 / 暂停 / 收起', async (t) => {
   h.doc.getElementById('ul-pause').click();
   assert.strictEqual(h.txt('ul-pause'), '暂停', '暂停文案不该变「恢复」');
 });
+
+test('倍速下拉只有 8 和 16，默认选中 8', async (t) => {
+  const h = await boot(t);
+  const sel = h.doc.getElementById('ul-rate');
+  assert.deepStrictEqual([...sel.options].map((o) => o.value), ['8', '16']);
+  assert.strictEqual(sel.value, '8');
+});
+
+test('改倍速后立即作用到正在播放的视频', async (t) => {
+  const h = await boot(t);
+  hideModals(h.window);
+  markVideoUnfinished(h.window);          // 需要真的走视频路径，playbackRate 才有意义
+  const v = installVideoMock(h.window);
+  h.start();
+  await sleep(2500);
+  assert.strictEqual(v.rate, 8, '默认应作用 8x');
+  const sel = h.doc.getElementById('ul-rate');
+  sel.value = '16';
+  sel.dispatchEvent(new h.window.Event('change'));
+  await sleep(500);
+  assert.strictEqual(v.rate, 16, '改成 16x 后应立刻生效');
+});
