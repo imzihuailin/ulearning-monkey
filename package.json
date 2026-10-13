@@ -2,6 +2,7 @@
   "name": "ulearning-auto",
   "private": true,
   "version": "1.5.0",
+  "license": "GPL-3.0-or-later",
   "scripts": {
     "test": "node --test \"test/**/*.test.js\""
   },
