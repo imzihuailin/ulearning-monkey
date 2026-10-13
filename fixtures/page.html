@@ -1,0 +1,59 @@
+<!doctype html><html><head><meta charset="utf-8"><title>ul-fixture</title></head><body>
+<div class="page-wrapper"><div class="page-element" id="pageElement1">
+ <div class="video-element" data-bind="css: { 'only-video': $parent.onlyVideo() }">
+  <div class="video-container"><div class="video-wrapper">
+   <div class="video-media-element">
+    <div class="mejs__container" id="mep_0">
+      <video></video>
+      <div class="mejs__overlay mejs__layer mejs__overlay-play">
+        <div class="mejs__overlay-button" role="button" tabindex="0" aria-label="&#25773;&#25918;" aria-pressed="false"></div>
+      </div>
+    </div>
+   </div>
+   <div class="video-track-wrapper"></div>
+  </div>
+  <div class="video-info"><div class="video-bottom"><div class="video-progress clearfix"><div class="bubble"></div>
+    <div class="text"><span data-bind="text: $root.i18nMessageText().finished"></span></div>
+  </div></div></div>
+  </div>
+ </div>
+</div></div>
+<div class="next-page-btn cursor" data-bind="click: goNextPage">
+  <div class="btn-tip"><span data-bind="text: i18nMessageText().nextPage"></span><i class="iconfont">&#xe847;</i></div>
+</div>
+<div class="modal" id="m-walk"><div class="modal-info"><div class="title">&#35745;&#26102;&#23398;&#20064;&#24050;&#26242;&#20572;</div>
+  <div class="content"><span data-bind="text: $root.i18nMsgText().walkingTooLong">x</span></div></div>
+  <div class="modal-operation"><button class="btn-submit" type="button" data-bind="text: $root.i18nMsgText().continueStudy">&#32487;&#32493;&#23398;&#20064;</button></div></div>
+<div class="modal" id="m-q"><div class="content"><span data-bind="text: $root.i18nMsgText().questionsNotCompleted">y</span></div>
+  <div class="modal-operation"><button class="btn-hollow" type="button" data-bind="text: $root.i18nMsgText().confirmLeave">&#30830;&#23450;&#31163;&#24320;</button></div></div>
+<div class="stat-page" style="display:none"><div class="incomplete">
+  <span data-bind="text: i18nMessageText().incompleteChapter"></span>
+  <span data-bind="text: i18nMessageText().incompleteChapter2"></span></div>
+  <div class="stat-next">
+   <button class="btn-hollow" data-bind="click: reviewChapter" type="button">r</button>
+   <button class="btn-hollow" data-bind="click: goNextPage" type="button">g</button>
+   <button class="btn-hollow" data-bind="click: closeStatPage" type="button">c</button></div></div>
+<script>window.__clicks=[];document.addEventListener('click',function(e){var t=e.target.closest('button,span,div.mejs__overlay-button');if(t)window.__clicks.push((t.getAttribute('data-bind')||t.className||t.tagName).slice(0,60));},true);window.__errs=[];window.onerror=function(m){window.__errs.push(String(m));};</script>
+<script>
+window.__curPageId = 0;
+(function(){
+  const pages=[];
+  for(let i=0;i<20;i++) pages.push({
+    isHide:()=>false, id:()=>2000+i,
+    record:()=>({ status:()=> i<7?1:0, videoDuration:()=> i<7?600:0 }),
+    pageElements:()=>[]
+  });
+  const section={isHide:()=>false, pages:()=>pages, id:()=>11};
+  const chapter={isHide:()=>false, sections:()=>[section], id:()=>1};
+  window.koLearnCourseViewModel={
+    course:{chapters:()=>[chapter]},
+    currentPage:()=>({id:()=>window.__curPageId}),
+    currentSection:()=>section
+  };
+  // 点击"下一页"时推进页码，模拟正常翻页
+  document.addEventListener('click',function(e){
+    const t=e.target.closest('span');
+    if(t && (t.getAttribute('data-bind')||'').indexOf('nextPage')>=0) window.__curPageId++;
+  },true);
+})();
+</script></body></html>
