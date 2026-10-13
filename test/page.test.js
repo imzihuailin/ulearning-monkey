@@ -73,3 +73,15 @@ test('「离开太久」弹窗被点掉', async (t) => {
   await sleep(3000);
   assert.ok(clicked >= 1, '应点掉"离开太久"弹窗');
 });
+
+test('面板只留三个按钮：开始 / 暂停 / 收起', async (t) => {
+  const h = await boot(t);
+  assert.strictEqual(h.doc.getElementById('ul-stop'), null, '停止按钮应已被移除');
+  assert.ok(h.doc.getElementById('ul-start'), '开始按钮必须在');
+  assert.ok(h.doc.getElementById('ul-pause'), '暂停按钮必须在');
+  assert.ok(h.doc.getElementById('ul-hide'), '收起按钮必须在');
+  assert.strictEqual(h.txt('ul-pause'), '暂停', '暂停按钮文案必须是「暂停」');
+  // 暂停按钮的文案任何时候都不该变成"恢复"
+  h.doc.getElementById('ul-pause').click();
+  assert.strictEqual(h.txt('ul-pause'), '暂停', '暂停文案不该变「恢复」');
+});

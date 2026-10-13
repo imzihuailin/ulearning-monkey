@@ -251,7 +251,6 @@
       <div style="padding:10px 14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <button id="ul-start" style="padding:6px 14px;background:#3b82f6;color:#fff;border:none;border-radius:6px;cursor:pointer;">开始</button>
         <button id="ul-pause" style="padding:6px 12px;background:#6b7280;color:#fff;border:none;border-radius:6px;cursor:pointer;">暂停</button>
-        <button id="ul-stop" style="padding:6px 12px;background:#b91c1c;color:#fff;border:none;border-radius:6px;cursor:pointer;">停止</button>
         <label style="font-size:12px;color:#bbb;">倍速
           <select id="ul-rate" style="margin-left:4px;padding:4px;border-radius:4px;background:#2a3040;color:#fff;border:1px solid #444;">
             <option value="1">1x</option>
@@ -289,14 +288,6 @@
       paused = !paused;
       setStatus(paused ? '已暂停' : '运行中');
       log(paused ? '已暂停，点击恢复' : '已恢复');
-    });
-
-    document.getElementById('ul-stop').addEventListener('click', () => {
-      if (!running) { log('当前没有在运行'); return; }
-      running = false; paused = false;
-      setStatus('已停止');
-      log('手动停止');
-      updateProgress();
     });
 
     document.getElementById('ul-rate').addEventListener('change', (e) => {
