@@ -1,0 +1,11 @@
+{
+  "name": "ulearning-auto",
+  "private": true,
+  "version": "1.5.0",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "devDependencies": {
+    "jsdom": "^26.0.0"
+  }
+}
